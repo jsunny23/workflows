@@ -1,0 +1,120 @@
+name: e2e-tests 
+
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 2
+    
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'
+
+    - name: Install Python dependencies
+      run: python -m pip install --upgrade pip scipy numpy
+
+      # - name: Install gettext
+      # run: sudo apt-get update && sudo apt-get install gettext -y
+
+    - uses: Azure/aks-set-context@v1
+      with:
+        creds: '${{ secrets.AZURE_CREDENTIALS }}'
+        cluster-name: stjude-staging
+        resource-group: rgStagingEastus
+
+    - name: Run Kubernetes Job
+      run: |
+        kubectl config set-context --current --namespace=genomics
+        
+        # Create name for folder
+        git_hash=$(git rev-parse --short "$GITHUB_SHA")
+        git_branch=${GITHUB_REF##*/}
+        timestamp=$(date +"%s")
+
+        # Create folder to use as work directory
+        path=${git_branch}_${git_hash}_${timestamp}
+        mkdir $path
+
+        # Get pod name
+        # POD=$(kubectl get pod -l app=miniwdl-deployment-dind -o jsonpath="{.items[0].metadata.name}")
+
+        # Copy working directory for this run to the pod
+        # kubectl cp $path -n genomics -c miniwdl $POD:/root/
+
+        # Copy working directory for this run to Azure Fileshare
+        az storage directory create --account-name workflowsci --account-key "${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}" --share-name work --name $path
+
+        # Get list of changed files
+        CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r $GITHUB_SHA)
+        echo $CHANGED_FILES
+
+        # Find wdl files in workflows directory
+        find ./workflows -name '*.wdl' -type f > wdl_files.txt
+
+        # Get deployment yaml
+        # https://workflowsci.file.core.windows.net/data/job.yml
+        az storage file download  --path job.yml --account-name workflowsci --account-key "${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}" --share-name data --dest `pwd`
+
+        echo "starting loop.."
+        while read -r file; do
+          echo $file
+          workflow=`echo $file | sed 's/.\///'`
+          if [[ "${CHANGED_FILES[@]}" =~ "${workflow}" ]]; then
+            # This workflow has been changed
+            workflow_name=$(basename $workflow .wdl)
+            workflow_dir=$(dirname $file)
+
+            # Copy latest workflow and inputs to working directory
+            mkdir -p $path/$workflow_name/
+            # cp $file $path/$workflow_name/
+            # cp $workflow_dir/ci/$workflow_name-inputs-ci.json $path/$workflow_name/$workflow_name-inputs-ci.json
+
+            # Create directory in Azure for workflow
+            az storage directory create --account-name workflowsci --account-key '${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}' --share-name work --name $path/$workflow_name
+
+            # Copy wdl file and inputs json to Azure fileshare
+            az storage file upload --account-name workflowsci --account-key '${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}' --share-name work --source $file --path $path/$workflow_name
+            az storage file upload --account-name workflowsci --account-key '${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}' --share-name work --source $workflow_dir/ci/$workflow_name-inputs-ci.json \
+            --path $path/$workflow_name  
+
+            mkdir $path/$workflow_name/outputs
+            az storage directory create --account-name workflowsci --account-key '${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}' --share-name work --name $path/$workflow_name/outputs
+            # Copy working directory to pod
+            # kubectl cp $path/$workflow_name -n genomics -c miniwdl $POD:/root/$path/
+          
+            WORKFLOW_FILE=/work/$path/$workflow_name/$workflow_name.wdl
+            WORKFLOW_INPUTS=/work/$path/$workflow_name/$workflow_name-inputs-ci.json
+
+            # Start job
+            sed -e "s/<WORKFLOW_FILE>/$WORKFLOW_FILE/g; s/<WORKFLOW_INPUTS>/$WORKFLOW_INPUTS/g" job.yml > job-$path-$workflow_name.yml
+            kubectl create -f job-$path-$workflow_name.yml
+
+            # Run kubernetes job
+            # kubectl exec -n genomics -c miniwdl $POD -- miniwdl run --dir /root/$path /root/$path/$workflow_name/$workflow_name.wdl -i /root/$path/$workflow_name/$workflow_name-inputs-ci.json
+
+            # Copy each output out of the pod
+            # while read -r output; do
+            #   output_path=$(kubectl exec -n genomics -c miniwdl $POD -- find /root/$path -path "*/output_links/$output")
+            #   real_output_path=$(kubectl exec -n genomics -c miniwdl $POD -- readlink -f $output_path)
+
+            # # Kubectl expects to copy files to filenames not directories
+            #   output_name=$(kubectl exec -n genomics -c miniwdl $POD -- basename $real_output_path)
+            #   kubectl cp -n genomics -c miniwdl $POD:$real_output_path $path/$workflow_name/outputs/$output_name
+            # done < $workflow_dir/ci/$workflow_name-outputs.txt
+
+            # mkdir $path/$workflow_name/validation
+            # kubectl cp -n genomics -c miniwdl $POD:/mnt/validation/$workflow_name $path/$workflow_name/validation/
+
+            # Validate output
+            cp $workflow_dir/ci/$workflow_name-validate $path/$workflow_name/
+            chmod +x $path/$workflow_name/$workflow_name-validate
+            $path/$workflow_name/$workflow_name-validate $path/$workflow_name/outputs/ $path/$workflow_name/validation/
+          fi
+        done < wdl_files.txt
+
