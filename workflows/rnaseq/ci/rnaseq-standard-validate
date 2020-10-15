@@ -1,0 +1,49 @@
+#!/opt/hostedtoolcache/Python/3.8.3/x64/bin/python
+
+import argparse
+import csv
+import glob
+import os
+import sys
+from scipy import stats
+
+parser = argparse.ArgumentParser(description='Validate RNA Seq workflow outputs')
+parser.add_argument('outputs_dir', help='Path to directory with output files')
+parser.add_argument('validation_dir', help='Path to directory with validation files')
+
+args = parser.parse_args()
+
+gene_names = []
+output_counts = []
+for file in os.listdir(args.outputs_dir):
+    file_path = os.path.join(args.outputs_dir, file)
+    with open(file_path) as fd:
+        data = csv.reader(fd, delimiter="\t", quotechar='"')
+        for gene_name, gene_count in data:
+            gene_names.append(gene_name)
+            output_counts.append(gene_count)
+
+output_counts = [int(value) for value in output_counts]
+
+truth_counts = []
+for file in os.listdir(args.validation_dir):
+    file_path = os.path.join(args.validation_dir, file)
+    with open(file_path) as fd:
+        data = csv.reader(fd, delimiter="\t", quotechar='"')
+        for gene_name, gene_count in data:
+            truth_counts.append(gene_count)
+
+truth_counts = [int(value) for value in truth_counts]
+
+def rsquared(x, y):
+    slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+    return r_value**2
+
+r_squared = rsquared(truth_counts, output_counts)
+print(f'R-squared value = {r_squared}')
+
+if r_squared < 0.98:
+    sys.exit(1)
+else:
+    sys.exit(0)
+

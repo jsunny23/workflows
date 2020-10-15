@@ -1,0 +1,1 @@
+gene_counts/SJCOGALL010897_D2.Aligned.out.sorted.feature-counts.txt

@@ -92,7 +92,8 @@ jobs:
             WORKFLOW_INPUTS=/work/$path/$workflow_name/$workflow_name-inputs-ci.json
 
             # Start job
-            sed -e "s/<WORKFLOW_FILE>/$WORKFLOW_FILE/g; s/<WORKFLOW_INPUTS>/$WORKFLOW_INPUTS/g" job.yml > job-$path-$workflow_name.yml
+            echo "Starting job"
+            sed 's/<WORKFLOW_FILE>/$WORKFLOW_FILE/g; s/<WORKFLOW_INPUTS>/$WORKFLOW_INPUTS/g' job.yml > job-$path-$workflow_name.yml
             kubectl create -f job-$path-$workflow_name.yml
 
             # Run kubernetes job
