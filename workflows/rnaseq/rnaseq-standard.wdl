@@ -39,6 +39,7 @@ import "https://raw.githubusercontent.com/stjudecloud/workflows/master/tools/sam
 import "https://raw.githubusercontent.com/stjudecloud/workflows/master/tools/util.wdl"
 import "https://raw.githubusercontent.com/stjudecloud/workflows/master/tools/deeptools.wdl"
 
+
 workflow rnaseq_standard {
     input {
         File gencode_gtf
