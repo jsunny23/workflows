@@ -93,7 +93,7 @@ jobs:
 
             # Start job
             echo "Starting job"
-            sed 's/<WORKFLOW_FILE>/$WORKFLOW_FILE/g; s/<WORKFLOW_INPUTS>/$WORKFLOW_INPUTS/g' job.yml > job-$path-$workflow_name.yml
+            sed "s,<WORKFLOW_FILE>,$WORKFLOW_FILE,g; s,<WORKFLOW_INPUTS>,$WORKFLOW_INPUTS,g" job.yml > job-$path-$workflow_name.yml
             kubectl create -f job-$path-$workflow_name.yml
 
             # Run kubernetes job
