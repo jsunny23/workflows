@@ -39,6 +39,7 @@ jobs:
 
         # Create folder to use as work directory
         path=${git_branch}_${git_hash}_${timestamp}
+        echo "Path: ${path}"
         mkdir $path
 
         # Get pod name
